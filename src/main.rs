@@ -180,7 +180,7 @@ fn main() {
     loop {
         if board.game_over {
             println!("You hit a mine. Game over.");
-            // Optionally, reveal all mines
+            
             for x in 0..WIDTH {
                 for y in 0..HEIGHT {
                     if board.grid[x][y].has_mine {
