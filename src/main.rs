@@ -30,6 +30,7 @@ struct Board {
     grid: Vec<Vec<Cell>>,
     game_over: bool,
     mines_placed: bool,
+    first_move: Option<(usize, usize)>,
 }
 
 impl Board {
@@ -38,145 +39,163 @@ impl Board {
             grid: vec![vec![Cell::new(); WIDTH]; HEIGHT],
             game_over: false,
             mines_placed: false,
+            first_move: None,
         }
     }
 
-    fn place_mines(&mut self){
+    fn print_board(&self) {
+        print!("  ");
+        for x in 0..WIDTH {
+            print!("{}", x);
+        }
+        println!();
+        for y in (0..HEIGHT).rev() {
+            print!("{}|", y);
+            for x in 0..WIDTH {
+                let cell = &self.grid[x][y];
+                if cell.state == covered || cell.state == unknown || cell.has_mine {
+                    print!("?");
+                } else if cell.state == uncovered {
+                    if cell.adjacent_mines > 0 {
+                        print!("{}", cell.adjacent_mines);
+                    } else {
+                        print!(" ");
+                    }
+                } else {
+                    print!("?");
+                }
+            }
+            println!();
+        }
+        // Print list of mine coordinates
+        let mines = self.mine_list();
+        print!("Mines:");
+        for (x, y) in mines {
+            print!(" ({} {})", x, y);
+        }
+        println!();
+    }
+
+    fn mine_list(&self) -> Vec<(usize, usize)> {
+        let mut mines = Vec::new();
+        for x in 0..WIDTH {
+            for y in 0..HEIGHT {
+                if self.grid[x][y].has_mine {
+                    mines.push((x, y));
+                }
+            }
+        }
+        mines
+    }
+
+    fn place_mines(&mut self, first_x: usize, first_y: usize) {
         let mut rng = rand::thread_rng();
         let mut mines_to_place = NUM_MINES;
         while mines_to_place > 0 {
             let x = rng.gen_range(0..WIDTH);
             let y = rng.gen_range(0..HEIGHT);
-            
-            if self.grid[x][y].has_mine == true{
+            if (x == first_x && y == first_y) || self.grid[x][y].has_mine {
                 continue;
             }
             self.grid[x][y].has_mine = true;
             mines_to_place -= 1;
         }
+        self.calculate_adjacent_mines();
         self.mines_placed = true;
     }
 
+    fn calculate_adjacent_mines(&mut self) {
+        for x in 0..WIDTH {
+            for y in 0..HEIGHT {
+                let mut count = 0;
+                for dx in -1..=1 {
+                    for dy in -1..=1 {
+                        if dx == 0 && dy == 0 { continue; }
+                        let nx = x as isize + dx;
+                        let ny = y as isize + dy;
+                        if nx >= 0 && nx < WIDTH as isize && ny >= 0 && ny < HEIGHT as isize {
+                            if self.grid[nx as usize][ny as usize].has_mine {
+                                count += 1;
+                            }
+                        }
+                    }
+                }
+                self.grid[x][y].adjacent_mines = count;
+            }
+        }
+    }
+
     fn uncover(&mut self, x: usize, y: usize) -> bool {
-        if self.grid[x][y].has_mine == true {
+        if self.grid[x][y].state == uncovered {
+            return true;
+        }
+        if self.grid[x][y].has_mine {
+            self.grid[x][y].state = uncovered;
             self.game_over = true;
             return false;
         }
-
-        self.grid[x][y].state = uncovered;
-        let mut count = 0;
-        // hab=ndling (0 0) case separatly
-        if x==0 && y ==0 {
-            if self.grid[0][1].has_mine{
-                count+=1; }
-            if self.grid[1][0].has_mine{
-                    count+=1; }
-            if self.grid[1][1].has_mine{
-                count+=1; }
-
-                for row in &self.grid {
-                    for cell in row {
-                        if cell.has_mine {
-                            print!("*");
-                        } else if cell.state == uncovered{
-                            print!("{}",count);
-                        }
-                        else {
-                            print!("?");
-                        }
-                        print!(" ");
-                    }
-                    println!();
-                }
-                return true;
-        }
-        if x-1>=0 {
-            if self.grid[x-1][y].has_mine{
-            count+=1; }
-        }
-        if x+1<=4 {
-            if self.grid[x+1][y].has_mine {
-            count+=1; }
-        }
-        if y+1<=4 {
-            if self.grid[x][y+1].has_mine {
-            count+=1;}
-        }
-        if y-1>=0 {
-            if self.grid[x][y-1].has_mine {
-            count+=1; }
-        }
-        if x-1>=0 && y-1>=0 {
-            if self.grid[x-1][y-1].has_mine {
-            count+=1;}
-        }
-        if x+1<=4 && y-1>=0 {
-            if self.grid[x+1][y-1].has_mine {
-            count+=1;}
-        }
-        if x+1<=4 && y+1<=4 {
-            if self.grid[x+1][y+1].has_mine {
-            count+=1; }
-        }
-        if x-1>=0 && y+1<=4 {
-            if self.grid[x-1][y+1].has_mine {
-            count+=1; }
-        }       
-
-        for row in &self.grid {
-            for cell in row {
-                if cell.has_mine {
-                    print!("*");
-                } else if cell.state == uncovered{
-                    print!("{}",count);
-                }
-                else {
-                    print!("?");
-                }
-                print!(" ");
-            }
-            println!();
-        }
+        self.recursive_uncover(x, y);
         true
     }
 
-    fn check_win(&self) -> bool {
-        let uncovered_cells = self.grid.iter().flatten().filter(|c| c.state == uncovered).count();
-        uncovered_cells == WIDTH * HEIGHT - NUM_MINES
+    fn recursive_uncover(&mut self, x: usize, y: usize) {
+        if x >= WIDTH || y >= HEIGHT {
+            return;
+        }
+        if self.grid[x][y].state == uncovered {
+            return;
+        }
+        self.grid[x][y].state = uncovered;
+        if self.grid[x][y].adjacent_mines > 0 {
+            return;
+        }
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if dx == 0 && dy == 0 { continue; }
+                let nx = x as isize + dx;
+                let ny = y as isize + dy;
+                if nx >= 0 && nx < WIDTH as isize && ny >= 0 && ny < HEIGHT as isize {
+                    self.recursive_uncover(nx as usize, ny as usize);
+                }
+            }
+        }
     }
 
-    fn print_mines(&self) {
-        for row in &self.grid {
-            for cell in row {
-                if cell.has_mine == true {
-                    print!("*");
-                }else {
-                    print!("?");
+    fn check_win(&self) -> bool {
+        let mut covered_cells = 0;
+        for x in 0..WIDTH {
+            for y in 0..HEIGHT {
+                if !self.grid[x][y].has_mine && self.grid[x][y].state != uncovered {
+                    covered_cells += 1;
                 }
-                print!(" ");
             }
-            println!();
         }
-        
+        covered_cells == 0
     }
 }
 
 fn main() {
     let mut board = Board::new();
-    //placing the mines and print 
-    board.place_mines(); // m - mine
-    board.print_mines(); // m - mine
-    loop {        
+    board.print_board();
+    loop {
         if board.game_over {
-            println!("You hit a mine Game over.");
+            println!("You hit a mine. Game over.");
+            // Optionally, reveal all mines
+            for x in 0..WIDTH {
+                for y in 0..HEIGHT {
+                    if board.grid[x][y].has_mine {
+                        board.grid[x][y].state = uncovered;
+                    }
+                }
+            }
+            board.print_board();
             break;
         }
-
         if board.check_win() {
-            println!("Congratulations You have cleared all the mines");
+            println!("Congratulations You have cleared all the mines.");
+            board.print_board();
             break;
         }
-
         println!("Enter coordinates (x y):");
         let mut input = String::new();
         io::stdin().read_line(&mut input).expect("Failed to read line");
@@ -199,7 +218,10 @@ fn main() {
                 continue;
             }
         };
-       
+        if !board.mines_placed {
+            board.place_mines(x, y);
+        }
         board.uncover(x, y);
+        board.print_board();
     }
 }
